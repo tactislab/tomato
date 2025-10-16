@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tomato Leaf Doctor</title>
+  <meta name="description" content="토마토 잎 병해 분류 – 사진 업로드/촬영 → 즉시 진단 (QR 공유 가능)">
+  <style>
+    :root{--bg:#0b1020;--card:#0f1734;--text:#e9eef7;--muted:#96a3c7;--primary:#6991ff;--border:#25315a}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui, -apple-system, Segoe UI, Roboto, Apple SD Gothic Neo, Noto Sans KR, sans-serif}
+    header{border-bottom:1px solid var(--border);padding:14px 18px;display:flex;gap:8px;align-items:center}
+    header h1{font-size:18px;margin:0;font-weight:700}
+    header small{color:var(--muted)}
+    .wrap{max-width:960px;margin:24px auto;padding:0 16px;display:grid;grid-template-columns:1.3fr 1fr;gap:16px}
+    @media (max-width: 880px){.wrap{grid-template-columns:1fr}}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px}
+    .uploader{border:2px dashed var(--border);border-radius:16px;padding:24px;text-align:center;cursor:pointer}
+    .uploader.drag{background:#121936}
+    input[type=file], button{background:#182253;color:var(--text);border:1px solid var(--border);border-radius:12px;padding:10px 14px}
+    button{cursor:pointer}
+    .controls{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+    #preview, #canvas, video{max-width:100%;border-radius:12px}
+    .hint{font-size:13px;color:var(--muted)}
+    .result{background:#0c1330;border:1px solid var(--border);border-radius:12px;padding:12px;margin-top:12px}
+    .result h3{margin:0 0 8px 0}
+    .badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#13225b;border:1px solid var(--border);font-size:12px}
+    .qrbox{display:flex;gap:16px;align-items:center}
+    .footer{opacity:.7;font-size:12px;margin-top:6px}
+    .warning{color:#ffd37b}
+  </style>
+</head>
+<body>
+<header>
+  <h1>Tomato Leaf Doctor</h1>
+  <small>앱 설치 없이 사진 업로드/촬영 → 병명 분류</small>
+</header>
+
+<div class="wrap">
+  <section class="card">
+    <div id="drop" class="uploader">
+      <p style="margin:0 0 6px">여기에 이미지를 끌어놓거나 클릭해 업로드</p>
+      <p class="hint">권장: 한 잎만, 선명하게, 배경 단순 · 긴 변 1024px로 자동 축소</p>
+      <input id="file" type="file" accept="image/*" capture="environment" style="display:none" />
+    </div>
+    <div class="controls">
+      <button id="useCamera">카메라 켜기</button>
+      <button id="stopCamera">카메라 끄기</button>
+      <button id="run" disabled>진단 실행</button>
+      <button id="reset">초기화</button>
+    </div>
+
+    <video id="video" playsinline style="display:none"></video>
+    <img id="preview" alt="미리보기" style="display:none" />
+    <canvas id="canvas" style="display:none"></canvas>
+
+    <div id="pred" class="result" style="display:none"></div>
+  </section>
+
+  <aside class="card">
+    <div class="qrbox">
+      <div id="qrcode"></div>
+      <div>
+        <div class="badge">이 페이지 공유용 QR</div>
+        <div class="footer">배포 후 실제 URL로 접속하면 이 QR도 그 주소로 바뀝니다.</div>
+      </div>
+    </div>
+
+    <div class="result" style="margin-top:12px">
+      <h3 style="margin-top:0">촬영 팁</h3>
+      <ul style="margin:6px 0 0 18px">
+        <li>잎만 크게(프레임의 60% 이상), 병반이 선명하게</li>
+        <li>밝은 곳, 그림자/빛 번짐 최소화</li>
+        <li>흔들림 없이, 배경은 단순하게</li>
+      </ul>
+    </div>
+  </aside>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+  // ========== 설정 ==========
+  // Cloudflare Worker 또는 서버리스 프록시의 분류 엔드포인트 URL
+  const PROXY_URL = "/api/classify"; // Vercel/Netlify Functions로 같은 도메인 경로 사용 // ← 여기를 배포 후 실제 주소로 바꿔주세요
+  const CONF_THRESH = 0.6; // 신뢰도 기준
+  const MAX_SIDE = 1024;   // 전송 전 긴 변 리사이즈
+
+  // ========= DOM =========
+  const drop = document.getElementById('drop');
+  const file = document.getElementById('file');
+  const runBtn = document.getElementById('run');
+  const video = document.getElementById('video');
+  const preview = document.getElementById('preview');
+  const canvas = document.getElementById('canvas');
+  const predBox = document.getElementById('pred');
+
+  // 현재 URL QR 생성
+  new QRCode(document.getElementById("qrcode"), { text: location.href, width: 160, height: 160 });
+
+  // ========= 업로드/드롭 =========
+  const setDrag = (on) => drop.classList.toggle('drag', !!on);
+  ['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); setDrag(true);}));
+  ;['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); setDrag(false);}));
+  drop.addEventListener('click', () => file.click());
+  drop.addEventListener('drop', e => handleFile(e.dataTransfer.files[0]));
+  file.addEventListener('change', e => handleFile(e.target.files[0]));
+
+  let stream = null; // 카메라 스트림
+
+  async function handleFile(f){
+    if(!f) return;
+    stopCamera();
+    const url = URL.createObjectURL(f);
+    preview.src = url; preview.style.display = 'block';
+    video.style.display = 'none';
+    runBtn.disabled = false;
+  }
+
+  document.getElementById('useCamera').onclick = async () => {
+    try{
+      stopCamera();
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      video.srcObject = stream; await video.play();
+      video.style.display = 'block'; preview.style.display = 'none';
+      runBtn.disabled = false;
+    }catch(err){ alert('카메라 접근이 거부되었거나 사용할 수 없습니다.'); }
+  };
+
+  document.getElementById('stopCamera').onclick = stopCamera;
+  function stopCamera(){ if(stream){ stream.getTracks().forEach(t=>t.stop()); stream = null; } video.pause(); video.srcObject = null; video.style.display = 'none'; }
+
+  document.getElementById('reset').onclick = () => { predBox.style.display='none'; predBox.innerHTML=''; preview.style.display='none'; canvas.style.display='none'; file.value=''; };
+
+  runBtn.onclick = async () => {
+    predBox.style.display='block'; predBox.innerHTML = '⏳ 분석 중...';
+    try{
+      // 1) 이미지 캡처/리사이즈 → base64(접두사 제외)
+      let b64 = null;
+      if(stream){
+        const capCanvas = document.createElement('canvas'); const ctx = capCanvas.getContext('2d');
+        capCanvas.width = video.videoWidth; capCanvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0);
+        b64 = await toResizedBase64(capCanvas, MAX_SIDE);
+      }else if(preview.src){
+        await preview.decode();
+        const img = preview;
+        const tmpC = document.createElement('canvas');
+        tmpC.width = img.naturalWidth; tmpC.height = img.naturalHeight;
+        tmpC.getContext('2d').drawImage(img,0,0);
+        b64 = await toResizedBase64(tmpC, MAX_SIDE);
+      }
+      if(!b64){ predBox.innerHTML = '<span class="warning">이미지를 선택하거나 카메라로 촬영해 주세요.</span>'; return; }
+
+      // 2) 프록시로 전송 (본문은 dataURL prefix 제외한 순수 base64)
+      const dataOnly = b64.split(',')[1] || b64; 
+      const res = await fetch(PROXY_URL, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ image: dataOnly }) });
+      if(!res.ok){ throw new Error('서버 응답 오류: '+res.status); }
+      const json = await res.json();
+
+      // 3) 결과 파싱 (robust)
+      const preds = Array.isArray(json.predictions) ? json.predictions : [];
+      const top = json.top || (preds.length ? preds[0] : null);
+
+      // 4) 미리보기 표시
+      canvas.style.display='block';
+      const ctx = canvas.getContext('2d');
+      const src = stream ? video : preview;
+      canvas.width = src.videoWidth || src.naturalWidth; canvas.height = src.videoHeight || src.naturalHeight;
+      ctx.drawImage(src,0,0,canvas.width,canvas.height);
+
+      // 5) 결과 렌더링
+      if(!top){ predBox.innerHTML = '<span class="warning">결과가 없습니다. 다시 촬영해 주세요.</span>'; return; }
+      const confPct = (top.confidence*100).toFixed(1);
+      let html = `<h3 style="margin-top:0">결과: ${escapeHtml(top.class || top.label || 'Unknown')} <span class="badge">${confPct}%</span></h3>`;
+      if(top.confidence < CONF_THRESH){
+        html += `<div class="warning">신뢰도(${confPct}%)가 낮습니다. 잎을 더 가까이, 밝은 곳에서 재촬영해 주세요.</div>`;
+      }
+      if(preds.length){
+        const show = preds.slice(0,3).map(p=>`<li>${escapeHtml(p.class || p.label || 'Unknown')} — ${(p.confidence*100).toFixed(1)}%</li>`).join('');
+        html += `<div style="margin-top:8px"><b>상위 후보</b><ul style="margin:6px 0 0 18px">${show}</ul></div>`;
+      }
+      predBox.innerHTML = html;
+    }catch(err){
+      console.error(err);
+      predBox.innerHTML = '<span class="warning">오류가 발생했습니다. 잠시 후 다시 시도해 주세요.</span>';
+    }
+  };
+
+  async function toResizedBase64(srcCanvas, maxSide){
+    // srcCanvas를 기준으로 긴 변 maxSide로 축소, jpeg 0.9
+    const w = srcCanvas.width, h = srcCanvas.height;
+    let nw=w, nh=h;
+    if(Math.max(w,h) > maxSide){
+      const ratio = w >= h ? maxSide / w : maxSide / h;
+      nw = Math.round(w * ratio); nh = Math.round(h * ratio);
+    }
+    const c = document.createElement('canvas');
+    c.width = nw; c.height = nh; c.getContext('2d').drawImage(srcCanvas, 0, 0, nw, nh);
+    return c.toDataURL('image/jpeg', 0.9); // data:image/jpeg;base64,...
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[m]));
+  }
+</script>
+<section class="card" style="max-width:960px;margin:12px auto">
+  <h3 style="margin:0 0 8px">서버리스 함수 예시 (Vercel /api/classify)</h3>
+  <pre style="white-space:pre-wrap;word-break:break-all;background:#0c1330;border:1px solid #25315a;border-radius:12px;padding:12px">
+
