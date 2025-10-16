@@ -20,33 +20,6 @@ export default async function handler(req, res) {
     const image = body && body.image;
     if (!image) return res.status(400).json({ error: 'no image' });
 
-    // 데모 모드: API 키가 없으면 샘플 응답 반환
-    if (!process.env.ROBOFLOW_API_KEY || process.env.ROBOFLOW_API_KEY === 'demo') {
-      // 랜덤하게 병해 시뮬레이션
-      const diseases = [
-        { class: "Tomato_Bacterial_spot", confidence: 0.89 },
-        { class: "Tomato_Early_blight", confidence: 0.92 },
-        { class: "Tomato_Late_blight", confidence: 0.87 },
-        { class: "Tomato_Leaf_Mold", confidence: 0.85 },
-        { class: "Tomato_Septoria_leaf_spot", confidence: 0.91 },
-        { class: "Tomato_healthy", confidence: 0.95 }
-      ];
-
-      const randomDisease = diseases[Math.floor(Math.random() * diseases.length)];
-      const demoResponse = {
-        predictions: [
-          randomDisease,
-          { class: "Other", confidence: 0.05 },
-          { class: "Unknown", confidence: 0.03 }
-        ],
-        top: randomDisease
-      };
-
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Content-Type', 'application/json');
-      return res.status(200).json(demoResponse);
-    }
-
     const api = `https://classify.roboflow.com/${process.env.DATASET}/${process.env.VERSION}?api_key=${process.env.ROBOFLOW_API_KEY}`;
 
     const rf = await fetch(api, {
