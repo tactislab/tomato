@@ -27,7 +27,7 @@ export default async function handler(req, res) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.ROBOFLOW_API_KEY || 'R0L0pGImpsJ0oIk3BxUo'}`
+        'Authorization': `Bearer ${process.env.ROBOFLOW_API_KEY || 'R0L0pGImpsJ0oIk36xUo'}`
       },
       body: JSON.stringify({
         images: { image: image }
