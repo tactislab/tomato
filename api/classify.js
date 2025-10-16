@@ -20,43 +20,30 @@ export default async function handler(req, res) {
     const image = body && body.image;
     if (!image) return res.status(400).json({ error: 'no image' });
 
-    // Workflow API 사용
-    const api = `https://serverless.roboflow.com/tomato-qio6k/workflows/detect-and-classify`;
+    // 데모 응답 (실제 API 연결 전 테스트용)
+    const diseases = [
+      "Bacterial_spot", "Early_blight", "Late_blight",
+      "Leaf_Mold", "Septoria_leaf_spot", "Spider_mites",
+      "Target_Spot", "Yellow_Leaf_Curl_Virus", "Mosaic_virus", "Healthy"
+    ];
 
-    const rf = await fetch(api, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.ROBOFLOW_API_KEY || 'R0L0pGImpsJ0oIk36xUo'}`
-      },
-      body: JSON.stringify({
-        images: { image: image }
-      })
-    });
+    // 랜덤 결과 생성
+    const randomResults = diseases
+      .sort(() => Math.random() - 0.5)
+      .slice(0, 3)
+      .map((disease, index) => ({
+        class: disease,
+        confidence: Math.max(0.95 - (index * 0.15), 0.1)
+      }));
 
-    const result = await rf.json();
-
-    // Workflow API 응답을 기존 형식으로 변환
-    let formattedResult;
-    if (result.outputs && result.outputs.length > 0) {
-      const predictions = result.outputs[0].predictions || [];
-      formattedResult = {
-        predictions: predictions.map(p => ({
-          class: p.class || p.class_name,
-          confidence: p.confidence
-        })),
-        top: predictions[0] ? {
-          class: predictions[0].class || predictions[0].class_name,
-          confidence: predictions[0].confidence
-        } : null
-      };
-    } else {
-      formattedResult = { predictions: [], top: null };
-    }
+    const mockResponse = {
+      predictions: randomResults,
+      top: randomResults[0]
+    };
 
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Content-Type', 'application/json');
-    return res.status(rf.status).json(formattedResult);
+    return res.status(200).json(mockResponse);
   } catch (e) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     return res.status(500).json({ error: e.message || 'proxy error' });
