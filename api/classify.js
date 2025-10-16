@@ -20,18 +20,43 @@ export default async function handler(req, res) {
     const image = body && body.image;
     if (!image) return res.status(400).json({ error: 'no image' });
 
-    const api = `https://classify.roboflow.com/${process.env.DATASET}/${process.env.VERSION}?api_key=${process.env.ROBOFLOW_API_KEY}`;
+    // Workflow API 사용
+    const api = `https://serverless.roboflow.com/tomato-qio6k/workflows/detect-and-classify`;
 
     const rf = await fetch(api, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: image // 순수 base64 문자열
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.ROBOFLOW_API_KEY || 'R0L0pGImpsJ0oIk3BxUo'}`
+      },
+      body: JSON.stringify({
+        images: { image: image }
+      })
     });
 
-    const text = await rf.text();
+    const result = await rf.json();
+
+    // Workflow API 응답을 기존 형식으로 변환
+    let formattedResult;
+    if (result.outputs && result.outputs.length > 0) {
+      const predictions = result.outputs[0].predictions || [];
+      formattedResult = {
+        predictions: predictions.map(p => ({
+          class: p.class || p.class_name,
+          confidence: p.confidence
+        })),
+        top: predictions[0] ? {
+          class: predictions[0].class || predictions[0].class_name,
+          confidence: predictions[0].confidence
+        } : null
+      };
+    } else {
+      formattedResult = { predictions: [], top: null };
+    }
+
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Content-Type', 'application/json');
-    return res.status(rf.status).send(text);
+    return res.status(rf.status).json(formattedResult);
   } catch (e) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     return res.status(500).json({ error: e.message || 'proxy error' });
